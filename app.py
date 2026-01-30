@@ -5,7 +5,6 @@ Hauptanwendung
 
 import streamlit as st
 from utils.supabase_client import get_supabase, check_maintenance
-from utils.auth import login_page, get_current_user, logout, check_session, check_auth
 from utils.config import (
     WHATSAPP_LINK, CALENDLY_LINK, BERATUNG_LINK, 
     IMPRESSUM_LINK, COMPANY_NAME, WEBSITE
@@ -90,9 +89,10 @@ if "user" not in st.session_state:
 if "kunde" not in st.session_state:
     st.session_state.kunde = None
 
-# === OAuth Callback prüfen ===
-if not st.session_state.user:
-    check_session()
+# === AUTH HANDLING (einmal pro Seitenaufruf) ===
+from utils.auth import handle_auth, show_login, logout
+
+is_logged_in, kunde = handle_auth()
 
 
 def render_sidebar():
@@ -163,13 +163,13 @@ def main():
     render_sidebar()
     
     # Nicht eingeloggt → Login-Seite
-    if not st.session_state.user:
-        login_page()
+    if not is_logged_in:
+        show_login()
         render_footer()
         return
     
     # Eingeloggt aber kein Kunde gefunden
-    if not st.session_state.kunde:
+    if not kunde:
         st.error("❌ Kein Zugang")
         st.warning("""
         Deine E-Mail-Adresse ist nicht für dieses Portal freigeschaltet.
@@ -192,7 +192,6 @@ def main():
         return
     
     # === HAUPTSEITE ===
-    kunde = st.session_state.kunde
     
     # Header
     st.markdown(f'<p class="main-header">🏛️ Willkommen, {kunde.get("name", "")}</p>', unsafe_allow_html=True)
