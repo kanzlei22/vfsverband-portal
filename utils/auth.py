@@ -3,19 +3,38 @@ Authentifizierung mit Google OAuth via streamlit-google-auth
 """
 
 import streamlit as st
+import json
+import tempfile
+import os
 from streamlit_google_auth import Authenticate
 from utils.supabase_client import get_kunde_by_email
 
 
 def get_authenticator():
     """Erstellt den Google Authenticator."""
+    # Credentials aus Secrets in temp Datei schreiben
+    credentials = {
+        "web": {
+            "client_id": st.secrets["google_oauth"]["client_id"],
+            "client_secret": st.secrets["google_oauth"]["client_secret"],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [st.secrets.get("redirect_url", "https://vfsverband.streamlit.app")]
+        }
+    }
+    
+    # Temp-Datei erstellen
+    temp_dir = tempfile.gettempdir()
+    creds_path = os.path.join(temp_dir, "google_creds.json")
+    
+    with open(creds_path, "w") as f:
+        json.dump(credentials, f)
+    
     return Authenticate(
-        secret_credentials_path="",  # Wir nutzen secrets stattdessen
+        secret_credentials_path=creds_path,
         cookie_name="vereins_portal_auth",
         cookie_key=st.secrets.get("cookie_key", "vereins_portal_secret_key_2026"),
         redirect_uri=st.secrets.get("redirect_url", "https://vfsverband.streamlit.app"),
-        client_id=st.secrets["google_oauth"]["client_id"],
-        client_secret=st.secrets["google_oauth"]["client_secret"],
     )
 
 
