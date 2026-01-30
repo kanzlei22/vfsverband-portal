@@ -4,9 +4,8 @@ Hauptanwendung
 """
 
 import streamlit as st
-st.write("DEBUG Version 3")
 from utils.supabase_client import get_supabase, check_maintenance
-from utils.auth import login_page, get_current_user, logout
+from utils.auth import login_page, get_current_user, logout, check_session
 from utils.config import (
     WHATSAPP_LINK, CALENDLY_LINK, BERATUNG_LINK, 
     IMPRESSUM_LINK, COMPANY_NAME, WEBSITE
@@ -90,6 +89,10 @@ if "user" not in st.session_state:
     st.session_state.user = None
 if "kunde" not in st.session_state:
     st.session_state.kunde = None
+
+# === OAuth Callback prüfen ===
+if not st.session_state.user:
+    check_session()
 
 
 def render_sidebar():
