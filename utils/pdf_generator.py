@@ -28,19 +28,36 @@ SCOPES = [
 def get_google_creds():
     """
     Holt Google API Credentials.
-    Versucht zuerst token.json (OAuth), dann Service Account.
+    Priorität: 1. OAuth Token aus Secrets, 2. token.json Datei, 3. Service Account
     """
     if not GOOGLE_API_AVAILABLE:
         raise Exception("Google API Libraries nicht installiert")
     
-    # Option 1: Token.json (OAuth) - bevorzugt wegen Quota
-    token_path = "config/token.json"
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
     
+    # Option 1: OAuth Token aus Streamlit Secrets (für Cloud Deployment)
+    if "google_oauth_token" in st.secrets:
+        try:
+            token_info = dict(st.secrets["google_oauth_token"])
+            creds = Credentials(
+                token=token_info.get("token"),
+                refresh_token=token_info.get("refresh_token"),
+                token_uri=token_info.get("token_uri"),
+                client_id=token_info.get("client_id"),
+                client_secret=token_info.get("client_secret"),
+                scopes=SCOPES
+            )
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            return creds
+        except Exception as e:
+            pass  # Fallback zu anderen Optionen
+    
+    # Option 2: Token.json Datei (für lokale Entwicklung)
+    token_path = "config/token.json"
     if os.path.exists(token_path):
         try:
-            from google.oauth2.credentials import Credentials
-            from google.auth.transport.requests import Request
-            
             creds = Credentials.from_authorized_user_file(token_path, SCOPES)
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
@@ -50,7 +67,7 @@ def get_google_creds():
         except Exception as e:
             pass  # Fallback zu Service Account
     
-    # Option 2: Service Account
+    # Option 3: Service Account (Fallback)
     try:
         if "google_service_account" in st.secrets:
             service_account_info = dict(st.secrets["google_service_account"])
@@ -60,7 +77,7 @@ def get_google_creds():
             )
             return creds
         else:
-            raise Exception("Weder token.json noch Service Account konfiguriert")
+            raise Exception("Keine Google Credentials konfiguriert (OAuth Token, token.json oder Service Account)")
     except Exception as e:
         raise Exception(f"Google Auth: {str(e)}")
 
