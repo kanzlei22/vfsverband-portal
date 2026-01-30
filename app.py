@@ -5,7 +5,7 @@ Hauptanwendung
 
 import streamlit as st
 from utils.supabase_client import get_supabase, check_maintenance
-from utils.auth import login_page, get_current_user, logout, check_session
+from utils.auth import login_page, get_current_user, logout, check_session, check_auth
 from utils.config import (
     WHATSAPP_LINK, CALENDLY_LINK, BERATUNG_LINK, 
     IMPRESSUM_LINK, COMPANY_NAME, WEBSITE
