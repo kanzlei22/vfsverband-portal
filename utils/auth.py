@@ -130,21 +130,33 @@ def require_auth():
 def check_session():
     """Prüft ob eine gültige Session existiert (nach OAuth Redirect)."""
     try:
-        # Debug: URL Parameter anzeigen
-        params = st.query_params
-        st.write(f"DEBUG: Query Params: {dict(params)}")
-        
         supabase = get_supabase()
+        
+        # Prüfe ob OAuth Code in URL ist
+        params = st.query_params
+        code = params.get("code")
+        
+        if code:
+            # Code gegen Session eintauschen
+            try:
+                response = supabase.auth.exchange_code_for_session({"auth_code": code})
+                if response and response.user:
+                    email = response.user.email
+                    process_login(email)
+                    # Code aus URL entfernen
+                    st.query_params.clear()
+                    return True
+            except Exception as e:
+                st.error(f"OAuth Fehler: {e}")
+        
+        # Prüfe bestehende Session
         session = supabase.auth.get_session()
-        
-        st.write(f"DEBUG: Session: {session}")
-        
         if session and session.user:
             email = session.user.email
-            st.write(f"DEBUG: Email gefunden: {email}")
             process_login(email)
             return True
+            
     except Exception as e:
-        st.write(f"DEBUG: Fehler in check_session: {e}")
+        st.error(f"Session Fehler: {e}")
     
     return False
