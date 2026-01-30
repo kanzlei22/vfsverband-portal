@@ -46,7 +46,7 @@ def login_page():
                 supabase = get_supabase()
                 
                 # OAuth URL generieren
-                redirect_url = st.secrets["redirect_url"]
+                redirect_url = st.secrets.get("redirect_url", "https://vfsverband.streamlit.app")
                 
                 result = supabase.auth.sign_in_with_oauth({
                     "provider": "google",
