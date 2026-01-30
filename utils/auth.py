@@ -131,7 +131,7 @@ def show_login():
         auth_url = get_google_auth_url()
         
         st.markdown(f'''
-            <a href="{auth_url}" target="_self" style="
+            <a href="{auth_url}" target="_top" style="
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
