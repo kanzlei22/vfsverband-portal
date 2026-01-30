@@ -4,6 +4,7 @@ Hauptanwendung
 """
 
 import streamlit as st
+st.write("DEBUG Version 3")
 from utils.supabase_client import get_supabase, check_maintenance
 from utils.auth import login_page, get_current_user, logout
 from utils.config import (
