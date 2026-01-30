@@ -130,25 +130,7 @@ def show_login():
         # Google Login Button
         auth_url = get_google_auth_url()
         
-        st.markdown(f'''
-            <a href="{auth_url}" target="_top" style="
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                width: 100%;
-                padding: 12px 24px;
-                background-color: #4285f4;
-                color: white;
-                text-decoration: none;
-                border-radius: 4px;
-                font-size: 16px;
-                font-weight: 500;
-                gap: 10px;
-            ">
-                <img src="https://www.google.com/favicon.ico" width="20" height="20">
-                Mit Google anmelden
-            </a>
-        ''', unsafe_allow_html=True)
+        st.link_button("🔐 Mit Google anmelden", auth_url, use_container_width=True, type="primary")
         
         st.markdown("---")
         st.caption("Mit dem Login stimmst du unseren Nutzungsbedingungen zu.")
