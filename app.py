@@ -88,6 +88,8 @@ if "user" not in st.session_state:
     st.session_state.user = None
 if "kunde" not in st.session_state:
     st.session_state.kunde = None
+if "connected" not in st.session_state:
+    st.session_state.connected = False
 
 # === AUTH HANDLING (einmal pro Seitenaufruf) ===
 from utils.auth import handle_auth, show_login, logout
