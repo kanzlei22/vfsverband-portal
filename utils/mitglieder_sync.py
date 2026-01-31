@@ -359,7 +359,7 @@ def export_meinverein_csv():
                 beitrag_zeitraum = "monatlich"
             
             row = {
-                "Mitgliedsnr.": m.get("mandatsreferenz", ""),
+                "Mitgliedsnr.": "",  # Leer lassen - MeinVerein vergibt automatisch
                 "Anrede": anrede,
                 "Titel": "",
                 "Vorname": m.get("vorname", ""),
