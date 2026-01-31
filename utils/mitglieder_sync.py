@@ -303,7 +303,7 @@ def export_meinverein_csv():
         if not mitglieder:
             return {"success": False, "xlsx_data": None, "member_ids": [], "error": "Keine Mitglieder zum Exportieren."}
         
-        # MeinVerein Spalten (exakt wie in der Vorlage)
+        # MeinVerein Spalten (exakt wie in der Vorlage, ohne individuelle Felder)
         columns = [
             "Mitgliedsnr.", "Anrede", "Titel", "Vorname", "Nachname",
             "Telefon", "Mobil", "E-Mail", "Strasse & Hausnr.", "PLZ", "Ort", "Land",
@@ -313,36 +313,37 @@ def export_meinverein_csv():
             "Beitrag (Zeitraum)", "Beitrag (Fälligkeit)", "Notizen",
             "Geschlecht", "Familienstand", "Zahlungsart", "IBAN", "Kontoinhaber",
             "SEPA-Mandat erteilt", "Mandatsreferenz", "Art des Mandats",
-            "Art der nächsten Lastschrift", "Mandat erteilt am", "Letzte Verwendung",
-            "Individuelles Feld 1", "Individuelles Feld 2", "Individuelles Feld 3",
-            "Individuelles Feld 4", "Individuelles Feld 5"
+            "Art der nächsten Lastschrift", "Mandat erteilt am", "Letzte Verwendung"
         ]
         
         rows = []
         member_ids = []
         
         for m in mitglieder:
-            # Mandatsdatum formatieren
+            # Mandatsdatum formatieren (als Datum-Objekt für Excel)
+            mandatsdatum_obj = None
             mandatsdatum = m.get("mandatsdatum", "")
             if mandatsdatum:
                 try:
-                    dt = datetime.fromisoformat(mandatsdatum.replace("Z", "+00:00")) if "T" in mandatsdatum else datetime.strptime(mandatsdatum, "%Y-%m-%d")
-                    mandatsdatum = dt.strftime("%d.%m.%Y")
+                    if "T" in mandatsdatum:
+                        mandatsdatum_obj = datetime.fromisoformat(mandatsdatum.replace("Z", "+00:00")).date()
+                    else:
+                        mandatsdatum_obj = datetime.strptime(mandatsdatum, "%Y-%m-%d").date()
                 except:
-                    mandatsdatum = datetime.now().strftime("%d.%m.%Y")
+                    mandatsdatum_obj = datetime.now().date()
             else:
-                mandatsdatum = datetime.now().strftime("%d.%m.%Y")
+                mandatsdatum_obj = datetime.now().date()
             
-            # Genehmigungsdatum
+            # Genehmigungsdatum (Mitglied seit)
+            mitglied_seit_obj = None
             genehmigt_am = m.get("genehmigt_am", "")
             if genehmigt_am:
                 try:
-                    dt = datetime.fromisoformat(genehmigt_am.replace("Z", "+00:00"))
-                    mitglied_seit = dt.strftime("%d.%m.%Y")
+                    mitglied_seit_obj = datetime.fromisoformat(genehmigt_am.replace("Z", "+00:00")).date()
                 except:
-                    mitglied_seit = datetime.now().strftime("%d.%m.%Y")
+                    mitglied_seit_obj = datetime.now().date()
             else:
-                mitglied_seit = datetime.now().strftime("%d.%m.%Y")
+                mitglied_seit_obj = datetime.now().date()
             
             # Geschlecht aus Anrede
             anrede = m.get("anrede", "Herr")
@@ -372,35 +373,30 @@ def export_meinverein_csv():
                 "Ort": m.get("ort", ""),
                 "Land": "Deutschland",
                 "Geburtstag": "",
-                "Mitglied seit": mitglied_seit,
+                "Mitglied seit": mitglied_seit_obj,
                 "Ebene 1": "",
                 "Ebene 2": "",
                 "Ebene 3": "",
                 "Ehrenmitglied": "Nein",
                 "Status": "Aktiv",
                 "Mitglied bis": "",
-                "Beitrag (Bezeichnung)": "Mitgliedsbeitrag",
-                "Beitrag (Typ)": "Fördermitglied",
-                "Beitrag (Betrag)": f"{beitrag_betrag:.2f}".replace(".", ","),
-                "Beitrag (Zeitraum)": beitrag_zeitraum,
-                "Beitrag (Fälligkeit)": "01",
+                "Beitrag (Bezeichnung)": "",  # Leer - wird in MeinVerein konfiguriert
+                "Beitrag (Typ)": "",  # Leer - wird in MeinVerein konfiguriert
+                "Beitrag (Betrag)": "",  # Leer
+                "Beitrag (Zeitraum)": "",  # Leer
+                "Beitrag (Fälligkeit)": "",  # Leer
                 "Notizen": m.get("notizen", ""),
                 "Geschlecht": geschlecht,
                 "Familienstand": "",
                 "Zahlungsart": "Lastschrift",
                 "IBAN": m.get("iban", "").replace(" ", ""),
                 "Kontoinhaber": m.get("kontoinhaber", ""),
-                "SEPA-Mandat erteilt": "Ja",
+                "SEPA-Mandat erteilt": "ja",  # klein geschrieben!
                 "Mandatsreferenz": m.get("mandatsreferenz", ""),
-                "Art des Mandats": "Wiederkehrende Zahlung",
-                "Art der nächsten Lastschrift": "Folgelastschrift",
-                "Mandat erteilt am": mandatsdatum,
-                "Letzte Verwendung": "",
-                "Individuelles Feld 1": "",
-                "Individuelles Feld 2": "",
-                "Individuelles Feld 3": "",
-                "Individuelles Feld 4": "",
-                "Individuelles Feld 5": ""
+                "Art des Mandats": "Einmalig",
+                "Art der nächsten Lastschrift": "Erste Lastschrift",
+                "Mandat erteilt am": mandatsdatum_obj,
+                "Letzte Verwendung": ""
             }
             
             rows.append(row)
