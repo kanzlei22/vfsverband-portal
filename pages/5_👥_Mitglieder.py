@@ -246,7 +246,7 @@ with tab3:
     # MeinVerein Export
     with col2:
         st.markdown("### 🔵 MeinVerein (Wiso)")
-        st.write("Exportiert Mitglieder als CSV für den Import in MeinVerein.")
+        st.write("Exportiert Mitglieder als XLSX für den Import in MeinVerein.")
         
         # Anzahl ausstehend
         response = supabase.table("mitglieder").select("id").eq("status", "genehmigt").eq("sync_meinverein", False).execute()
@@ -254,14 +254,14 @@ with tab3:
         
         st.info(f"**{pending_meinverein}** Mitglieder noch nicht exportiert")
         
-        if st.button("📥 CSV herunterladen", use_container_width=True, disabled=pending_meinverein==0):
+        if st.button("📥 XLSX herunterladen", use_container_width=True, disabled=pending_meinverein==0):
             result = export_meinverein_csv()
             if result["success"]:
                 st.download_button(
-                    label="💾 Download CSV",
-                    data=result["csv_data"],
-                    file_name=f"meinverein_import_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                    mime="text/csv"
+                    label="💾 Download XLSX für MeinVerein",
+                    data=result["xlsx_data"],
+                    file_name=f"meinverein_import_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
                 
                 # Als exportiert markieren

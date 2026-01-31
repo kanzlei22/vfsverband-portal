@@ -286,10 +286,13 @@ def sync_to_hubspot():
 
 def export_meinverein_csv():
     """
-    Exportiert nicht synchronisierte Mitglieder als CSV für MeinVerein.
-    Returns: {"success": bool, "csv_data": str, "member_ids": list, "error": str}
+    Exportiert nicht synchronisierte Mitglieder als XLSX für MeinVerein.
+    Returns: {"success": bool, "xlsx_data": bytes, "member_ids": list, "error": str}
     """
     try:
+        import pandas as pd
+        from io import BytesIO
+        
         supabase = get_supabase()
         
         # Nicht exportierte, genehmigte Mitglieder laden
@@ -298,21 +301,24 @@ def export_meinverein_csv():
         mitglieder = response.data if response.data else []
         
         if not mitglieder:
-            return {"success": True, "csv_data": "", "member_ids": [], "error": "Keine Mitglieder zum Exportieren."}
+            return {"success": False, "xlsx_data": None, "member_ids": [], "error": "Keine Mitglieder zum Exportieren."}
         
-        # CSV erstellen
-        output = io.StringIO()
-        
-        # Header (MeinVerein Format)
-        fieldnames = [
-            "Anrede", "Vorname", "Nachname", "E-Mail", 
-            "Straße", "PLZ", "Ort",
-            "IBAN", "Kontoinhaber", "Mandatsreferenz", "Mandatsdatum"
+        # MeinVerein Spalten (exakt wie in der Vorlage)
+        columns = [
+            "Mitgliedsnr.", "Anrede", "Titel", "Vorname", "Nachname",
+            "Telefon", "Mobil", "E-Mail", "Strasse & Hausnr.", "PLZ", "Ort", "Land",
+            "Geburtstag", "Mitglied seit", "Ebene 1", "Ebene 2", "Ebene 3",
+            "Ehrenmitglied", "Status", "Mitglied bis",
+            "Beitrag (Bezeichnung)", "Beitrag (Typ)", "Beitrag (Betrag)", 
+            "Beitrag (Zeitraum)", "Beitrag (Fälligkeit)", "Notizen",
+            "Geschlecht", "Familienstand", "Zahlungsart", "IBAN", "Kontoinhaber",
+            "SEPA-Mandat erteilt", "Mandatsreferenz", "Art des Mandats",
+            "Art der nächsten Lastschrift", "Mandat erteilt am", "Letzte Verwendung",
+            "Individuelles Feld 1", "Individuelles Feld 2", "Individuelles Feld 3",
+            "Individuelles Feld 4", "Individuelles Feld 5"
         ]
         
-        writer = csv.DictWriter(output, fieldnames=fieldnames, delimiter=';', quoting=csv.QUOTE_MINIMAL)
-        writer.writeheader()
-        
+        rows = []
         member_ids = []
         
         for m in mitglieder:
@@ -327,35 +333,97 @@ def export_meinverein_csv():
             else:
                 mandatsdatum = datetime.now().strftime("%d.%m.%Y")
             
+            # Genehmigungsdatum
+            genehmigt_am = m.get("genehmigt_am", "")
+            if genehmigt_am:
+                try:
+                    dt = datetime.fromisoformat(genehmigt_am.replace("Z", "+00:00"))
+                    mitglied_seit = dt.strftime("%d.%m.%Y")
+                except:
+                    mitglied_seit = datetime.now().strftime("%d.%m.%Y")
+            else:
+                mitglied_seit = datetime.now().strftime("%d.%m.%Y")
+            
+            # Geschlecht aus Anrede
+            anrede = m.get("anrede", "Herr")
+            geschlecht = "männlich" if anrede == "Herr" else "weiblich" if anrede == "Frau" else "divers"
+            
+            # Beitrag
+            beitrag = m.get("beitrag_monatlich", 25.00)
+            zahlungsweise = m.get("zahlungsweise", "monatlich")
+            if zahlungsweise == "jaehrlich":
+                beitrag_betrag = beitrag * 12
+                beitrag_zeitraum = "jährlich"
+            else:
+                beitrag_betrag = beitrag
+                beitrag_zeitraum = "monatlich"
+            
             row = {
-                "Anrede": m.get("anrede", ""),
+                "Mitgliedsnr.": m.get("mandatsreferenz", ""),
+                "Anrede": anrede,
+                "Titel": "",
                 "Vorname": m.get("vorname", ""),
                 "Nachname": m.get("nachname", ""),
+                "Telefon": "",
+                "Mobil": m.get("telefon", ""),
                 "E-Mail": m.get("email", ""),
-                "Straße": m.get("strasse", ""),
+                "Strasse & Hausnr.": m.get("strasse", ""),
                 "PLZ": m.get("plz", ""),
                 "Ort": m.get("ort", ""),
+                "Land": "Deutschland",
+                "Geburtstag": "",
+                "Mitglied seit": mitglied_seit,
+                "Ebene 1": "",
+                "Ebene 2": "",
+                "Ebene 3": "",
+                "Ehrenmitglied": "Nein",
+                "Status": "Aktiv",
+                "Mitglied bis": "",
+                "Beitrag (Bezeichnung)": "Mitgliedsbeitrag",
+                "Beitrag (Typ)": "Fördermitglied",
+                "Beitrag (Betrag)": f"{beitrag_betrag:.2f}".replace(".", ","),
+                "Beitrag (Zeitraum)": beitrag_zeitraum,
+                "Beitrag (Fälligkeit)": "01",
+                "Notizen": m.get("notizen", ""),
+                "Geschlecht": geschlecht,
+                "Familienstand": "",
+                "Zahlungsart": "Lastschrift",
                 "IBAN": m.get("iban", "").replace(" ", ""),
                 "Kontoinhaber": m.get("kontoinhaber", ""),
+                "SEPA-Mandat erteilt": "Ja",
                 "Mandatsreferenz": m.get("mandatsreferenz", ""),
-                "Mandatsdatum": mandatsdatum
+                "Art des Mandats": "Wiederkehrende Zahlung",
+                "Art der nächsten Lastschrift": "Folgelastschrift",
+                "Mandat erteilt am": mandatsdatum,
+                "Letzte Verwendung": "",
+                "Individuelles Feld 1": "",
+                "Individuelles Feld 2": "",
+                "Individuelles Feld 3": "",
+                "Individuelles Feld 4": "",
+                "Individuelles Feld 5": ""
             }
             
-            writer.writerow(row)
+            rows.append(row)
             member_ids.append(m["id"])
         
-        csv_data = output.getvalue()
+        # DataFrame erstellen
+        df = pd.DataFrame(rows, columns=columns)
+        
+        # XLSX erstellen
+        output = BytesIO()
+        df.to_excel(output, index=False, engine='openpyxl')
+        xlsx_data = output.getvalue()
         output.close()
         
         return {
             "success": True, 
-            "csv_data": csv_data, 
+            "xlsx_data": xlsx_data, 
             "member_ids": member_ids,
             "error": None
         }
         
     except Exception as e:
-        return {"success": False, "csv_data": "", "member_ids": [], "error": str(e)}
+        return {"success": False, "xlsx_data": None, "member_ids": [], "error": str(e)}
 
 
 def import_wiso_excel(file_data):
