@@ -126,6 +126,29 @@ def render_sidebar():
         st.page_link("pages/4_🔒_Datenschutz.py", label="🔒 Datenschutz", use_container_width=True)
         st.markdown(f"[Impressum]({IMPRESSUM_LINK})")
         st.caption(f"© 2026 {COMPANY_NAME}")
+        
+        # === VERSTECKTER ADMIN-BEREICH ===
+        st.markdown("---")
+        
+        # Admin-Login (nur sichtbar nach Klick auf Expander)
+        with st.expander("🔐 Admin", expanded=st.session_state.get("is_admin", False)):
+            if st.session_state.get("is_admin", False):
+                st.success("👑 Admin-Modus aktiv")
+                if st.button("👥 Mitgliederverwaltung", use_container_width=True, type="primary"):
+                    st.switch_page("pages/_admin_mitglieder.py")
+                if st.button("🚪 Admin abmelden", use_container_width=True):
+                    st.session_state["is_admin"] = False
+                    st.rerun()
+            else:
+                admin_pw = st.text_input("Passwort", type="password", key="admin_pw_sidebar")
+                if st.button("Anmelden", use_container_width=True):
+                    correct_pw = st.secrets.get("admin_password", "UV2024Admin!")
+                    if admin_pw == correct_pw:
+                        st.session_state["is_admin"] = True
+                        st.success("✅ Admin-Login erfolgreich!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Falsches Passwort")
 
 
 def render_footer():

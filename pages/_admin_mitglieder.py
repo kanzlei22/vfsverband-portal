@@ -1,25 +1,60 @@
 """
-👥 Mitgliederverwaltung
+👥 Mitgliederverwaltung (Admin-Bereich)
 UnternehmerVernetzt Deutschland e.V.
+VERSTECKTE SEITE - nur über Admin-Login erreichbar
 """
 
 import streamlit as st
-from datetime import datetime, timedelta
+from datetime import datetime
 import pandas as pd
-from utils.auth import require_auth
 from utils.supabase_client import get_supabase
 from utils.mitglieder_sync import (
     sync_from_google_sheet,
     sync_to_hubspot,
     export_meinverein_csv,
-    get_mitglieder_stats
+    get_mitglieder_stats,
+    mark_meinverein_exported
 )
 
-# Auth check
-require_auth()
+# === ADMIN CHECK - Bei fehlendem Login zurück zur Startseite ===
+if not st.session_state.get("is_admin", False):
+    st.error("⛔ Zugriff verweigert")
+    st.warning("Diese Seite ist nur für Administratoren zugänglich.")
+    st.info("Bitte melde dich über den Admin-Bereich in der Sidebar an.")
+    if st.button("← Zur Startseite"):
+        st.switch_page("app.py")
+    st.stop()
+
+# === PAGE CONFIG ===
+st.set_page_config(page_title="Admin - Mitgliederverwaltung", page_icon="👑", layout="wide")
 
 st.title("👥 Mitgliederverwaltung")
-st.caption("UnternehmerVernetzt Deutschland e.V.")
+st.caption("UnternehmerVernetzt Deutschland e.V. | 👑 Admin-Bereich")
+
+# Admin-Header
+col1, col2 = st.columns([4, 1])
+with col1:
+    st.success("👑 Admin-Modus aktiv")
+with col2:
+    if st.button("🚪 Admin abmelden"):
+        st.session_state["is_admin"] = False
+        st.switch_page("app.py")
+
+# === AUTO-SYNC beim ersten Seitenaufruf ===
+if "auto_sync_done" not in st.session_state:
+    st.session_state.auto_sync_done = False
+
+if not st.session_state.auto_sync_done:
+    with st.spinner("🔄 Prüfe neue Anträge..."):
+        result = sync_from_google_sheet()
+        st.session_state.auto_sync_done = True
+        
+        if result["success"]:
+            if result["imported"] > 0:
+                st.toast(f"🎉 Hurra! {result['imported']} neue Mitgliedsanträge!", icon="🎉")
+                st.balloons()
+            else:
+                st.toast("✅ Keine neuen Anträge", icon="✅")
 
 # === STATISTIK-KACHELN ===
 stats = get_mitglieder_stats()
@@ -57,11 +92,12 @@ with col4:
 st.divider()
 
 # === TABS ===
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📥 Neue Anträge", 
     "📋 Alle Mitglieder", 
     "🔄 Synchronisation",
-    "➕ Manuell anlegen"
+    "➕ Manuell anlegen",
+    "⚙️ Einstellungen"
 ])
 
 # --- TAB 1: NEUE ANTRÄGE ---
@@ -75,20 +111,26 @@ with tab1:
             with st.spinner("Importiere neue Anträge..."):
                 result = sync_from_google_sheet()
                 if result["success"]:
-                    st.success(f"✅ {result['imported']} neue Anträge importiert")
+                    if result["imported"] > 0:
+                        st.success(f"✅ {result['imported']} neue Anträge importiert!")
+                        st.balloons()
+                    else:
+                        st.info("ℹ️ Keine neuen Anträge gefunden.")
                     st.rerun()
                 else:
                     st.error(f"❌ Fehler: {result['error']}")
     
     # Neue Anträge anzeigen
     supabase = get_supabase()
-    response = supabase.table("mitglieder").select("*").eq("status", "neu").order("antragsdatum", desc=True).execute()
+    response = supabase.table("mitglieder").select("*").eq("status", "neu").order("created_at", desc=True).execute()
     
     neue_antraege = response.data if response.data else []
     
     if not neue_antraege:
         st.info("🎉 Keine neuen Anträge vorhanden.")
     else:
+        st.success(f"📬 **{len(neue_antraege)} neue Anträge** warten auf Prüfung!")
+        
         for antrag in neue_antraege:
             with st.expander(f"**{antrag['vorname']} {antrag['nachname']}** - {antrag['email']}", expanded=False):
                 col1, col2 = st.columns(2)
@@ -99,6 +141,7 @@ with tab1:
                     st.write(f"- Name: {antrag['vorname']} {antrag['nachname']}")
                     st.write(f"- E-Mail: {antrag['email']}")
                     st.write(f"- Telefon: {antrag.get('telefon', '-')}")
+                    st.write(f"- Instagram: {antrag.get('instagramname', '-')}")
                     
                     st.write("**Adresse:**")
                     st.write(f"- {antrag.get('strasse', '-')}")
@@ -108,14 +151,25 @@ with tab1:
                     st.write("**Mitgliedschaft:**")
                     art = "Natürliche Person" if antrag.get('mitgliedsart') == 'natuerlich' else "Juristische Person"
                     st.write(f"- Art: {art}")
-                    st.write(f"- Zahlungsweise: {antrag.get('zahlungsweise', 'monatlich')}")
+                    zahlungsweise = "Monatlich" if antrag.get('zahlungsweise') == 'monatlich' else "Jährlich"
+                    st.write(f"- Zahlungsweise: {zahlungsweise}")
+                    zahlungsart = "Lastschrift" if antrag.get('zahlungsart') == 'lastschrift' else "Rechnung"
+                    st.write(f"- Zahlungsart: {zahlungsart}")
                     st.write(f"- Beitrag: {antrag.get('beitrag_monatlich', 25):.2f} €/Monat")
                     
-                    st.write("**Bankdaten:**")
-                    st.write(f"- IBAN: {antrag.get('iban', '-')[:8]}...{antrag.get('iban', '-')[-4:]}")
-                    st.write(f"- Kontoinhaber: {antrag.get('kontoinhaber', '-')}")
+                    if antrag.get('zahlungsart') == 'lastschrift' and antrag.get('iban'):
+                        st.write("**Bankdaten:**")
+                        iban = antrag.get('iban', '')
+                        if len(iban) > 8:
+                            st.write(f"- IBAN: {iban[:8]}...{iban[-4:]}")
+                        else:
+                            st.write(f"- IBAN: {iban}")
+                        st.write(f"- Kontoinhaber: {antrag.get('kontoinhaber', '-')}")
+                    else:
+                        st.info("💳 Zahlung per Rechnung")
                     
-                    st.write(f"**Antragsdatum:** {antrag.get('antragsdatum', '-')[:10]}")
+                    created = antrag.get('created_at', '')[:10] if antrag.get('created_at') else '-'
+                    st.write(f"**Antragsdatum:** {created}")
                 
                 # Aktions-Buttons
                 st.divider()
@@ -123,15 +177,22 @@ with tab1:
                 
                 with col_a:
                     if st.button("✅ Genehmigen", key=f"approve_{antrag['id']}", type="primary"):
-                        # Status aktualisieren
-                        supabase.table("mitglieder").update({
+                        import secrets
+                        mandatsref = f"UV-{datetime.now().year}-{secrets.token_hex(4).upper()}"
+                        
+                        update_data = {
                             "status": "genehmigt",
                             "genehmigt_am": datetime.now().isoformat(),
-                            "genehmigt_von": st.session_state.user.get("email", "admin"),
-                            "mandatsreferenz": f"UV-{datetime.now().year}-{str(antrag['id'])[:8].upper()}"
-                        }).eq("id", antrag['id']).execute()
+                            "genehmigt_von": "admin"
+                        }
                         
-                        st.success("✅ Mitglied genehmigt!")
+                        if antrag.get('zahlungsart') == 'lastschrift':
+                            update_data["mandatsreferenz"] = mandatsref
+                            update_data["mandatsdatum"] = datetime.now().date().isoformat()
+                        
+                        supabase.table("mitglieder").update(update_data).eq("id", antrag['id']).execute()
+                        
+                        st.success(f"✅ {antrag['vorname']} {antrag['nachname']} genehmigt!")
                         st.rerun()
                 
                 with col_b:
@@ -227,6 +288,7 @@ with tab3:
     with col1:
         st.markdown("### 🟠 HubSpot")
         st.write("Synchronisiert genehmigte Mitglieder als Kontakte zu HubSpot.")
+        st.caption("Setzt 'Mitglied im Verein für Unternehmer' = Ja")
         
         # Anzahl ausstehend
         response = supabase.table("mitglieder").select("id").eq("status", "genehmigt").eq("sync_hubspot", False).execute()
@@ -238,7 +300,11 @@ with tab3:
             with st.spinner("Synchronisiere zu HubSpot..."):
                 result = sync_to_hubspot()
                 if result["success"]:
-                    st.success(f"✅ {result['synced']} Kontakte synchronisiert")
+                    if result["synced"] > 0:
+                        st.success(f"✅ {result['synced']} Kontakte zu HubSpot synchronisiert!")
+                        st.balloons()
+                    else:
+                        st.info("ℹ️ Keine neuen Kontakte zum Synchronisieren.")
                     st.rerun()
                 else:
                     st.error(f"❌ Fehler: {result['error']}")
@@ -254,25 +320,24 @@ with tab3:
         
         st.info(f"**{pending_meinverein}** Mitglieder noch nicht exportiert")
         
-        if st.button("📥 XLSX herunterladen", use_container_width=True, disabled=pending_meinverein==0):
+        if pending_meinverein > 0:
             result = export_meinverein_csv()
             if result["success"]:
-                st.download_button(
-                    label="💾 Download XLSX für MeinVerein",
-                    data=result["xlsx_data"],
-                    file_name=f"meinverein_import_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-                
-                # Als exportiert markieren
-                if st.button("✅ Als exportiert markieren"):
-                    for mid in result["member_ids"]:
-                        supabase.table("mitglieder").update({
-                            "sync_meinverein": True,
-                            "sync_meinverein_datum": datetime.now().isoformat()
-                        }).eq("id", mid).execute()
-                    st.success("Mitglieder als exportiert markiert")
-                    st.rerun()
+                col_dl, col_mark = st.columns(2)
+                with col_dl:
+                    st.download_button(
+                        label="💾 XLSX herunterladen",
+                        data=result["xlsx_data"],
+                        file_name=f"meinverein_import_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+                with col_mark:
+                    if st.button("✅ Als exportiert markieren", use_container_width=True):
+                        mark_result = mark_meinverein_exported(result["member_ids"])
+                        if mark_result["success"]:
+                            st.success(f"✅ {len(result['member_ids'])} Mitglieder als exportiert markiert!")
+                            st.rerun()
             else:
                 st.error(f"❌ Fehler: {result['error']}")
     
@@ -284,11 +349,15 @@ with tab3:
     response = supabase.table("mitglieder").select("vorname, nachname, sync_hubspot_datum, sync_meinverein_datum").order("sync_hubspot_datum", desc=True).limit(10).execute()
     
     if response.data:
+        found = False
         for m in response.data:
             if m.get("sync_hubspot_datum") or m.get("sync_meinverein_datum"):
+                found = True
                 hs = m.get("sync_hubspot_datum", "-")[:10] if m.get("sync_hubspot_datum") else "-"
                 mv = m.get("sync_meinverein_datum", "-")[:10] if m.get("sync_meinverein_datum") else "-"
                 st.write(f"- {m['vorname']} {m['nachname']}: HubSpot {hs} | MeinVerein {mv}")
+        if not found:
+            st.info("Noch keine Synchronisierungen durchgeführt.")
 
 
 # --- TAB 4: MANUELL ANLEGEN ---
@@ -305,6 +374,7 @@ with tab4:
             nachname = st.text_input("Nachname *")
             email = st.text_input("E-Mail *")
             telefon = st.text_input("Telefon")
+            instagramname = st.text_input("Instagram-Name")
             
             st.markdown("**Adresse**")
             strasse = st.text_input("Straße + Hausnummer *")
@@ -315,10 +385,11 @@ with tab4:
             st.markdown("**Mitgliedschaft**")
             mitgliedsart = st.selectbox("Art *", ["natuerlich", "juristisch"], format_func=lambda x: "Natürliche Person" if x == "natuerlich" else "Juristische Person")
             zahlungsweise = st.selectbox("Zahlungsweise *", ["monatlich", "jaehrlich"], format_func=lambda x: "Monatlich (25€)" if x == "monatlich" else "Jährlich (300€)")
+            zahlungsart = st.selectbox("Zahlungsart *", ["lastschrift", "rechnung"], format_func=lambda x: "Per Lastschrift" if x == "lastschrift" else "Auf Rechnung")
             
-            st.markdown("**Bankdaten**")
-            iban = st.text_input("IBAN *")
-            kontoinhaber = st.text_input("Kontoinhaber *")
+            st.markdown("**Bankdaten** (nur bei Lastschrift)")
+            iban = st.text_input("IBAN")
+            kontoinhaber = st.text_input("Kontoinhaber")
             
             st.markdown("**Status**")
             status = st.selectbox("Status", ["neu", "genehmigt"], index=1)
@@ -329,7 +400,11 @@ with tab4:
         
         if submitted:
             # Validierung
-            if not all([vorname, nachname, email, strasse, plz, ort, iban, kontoinhaber]):
+            required = [vorname, nachname, email, strasse, plz, ort]
+            if zahlungsart == "lastschrift":
+                required.extend([iban, kontoinhaber])
+            
+            if not all(required):
                 st.error("Bitte fülle alle Pflichtfelder aus.")
             else:
                 # Prüfe ob E-Mail bereits existiert
@@ -338,9 +413,9 @@ with tab4:
                 if existing.data:
                     st.error("❌ Ein Mitglied mit dieser E-Mail existiert bereits!")
                 else:
-                    # Anlegen
-                    beitrag = 25.00 if mitgliedsart == "natuerlich" else 300.00/12
-                    mandatsref = f"UV-{datetime.now().year}-{datetime.now().strftime('%m%d%H%M%S')}"
+                    import secrets as sec
+                    beitrag = 25.00
+                    mandatsref = f"UV-{datetime.now().year}-{sec.token_hex(4).upper()}" if zahlungsart == "lastschrift" else None
                     
                     neues_mitglied = {
                         "anrede": anrede,
@@ -348,21 +423,23 @@ with tab4:
                         "nachname": nachname,
                         "email": email.lower().strip(),
                         "telefon": telefon,
+                        "instagramname": instagramname,
                         "strasse": strasse,
                         "plz": plz,
                         "ort": ort,
-                        "iban": iban.replace(" ", "").upper(),
-                        "kontoinhaber": kontoinhaber,
+                        "iban": iban.replace(" ", "").upper() if iban else None,
+                        "kontoinhaber": kontoinhaber if kontoinhaber else None,
                         "mandatsreferenz": mandatsref,
-                        "mandatsdatum": datetime.now().date().isoformat(),
+                        "mandatsdatum": datetime.now().date().isoformat() if zahlungsart == "lastschrift" else None,
                         "mitgliedsart": mitgliedsart,
                         "zahlungsweise": zahlungsweise,
+                        "zahlungsart": zahlungsart,
                         "beitrag_monatlich": beitrag,
                         "status": status,
                         "quelle": quelle,
                         "notizen": notizen,
                         "genehmigt_am": datetime.now().isoformat() if status == "genehmigt" else None,
-                        "genehmigt_von": st.session_state.user.get("email", "admin") if status == "genehmigt" else None
+                        "genehmigt_von": "admin" if status == "genehmigt" else None
                     }
                     
                     result = supabase.table("mitglieder").insert(neues_mitglied).execute()
@@ -372,3 +449,80 @@ with tab4:
                         st.balloons()
                     else:
                         st.error("❌ Fehler beim Anlegen.")
+
+
+# --- TAB 5: EINSTELLUNGEN ---
+with tab5:
+    st.subheader("⚙️ Einstellungen & Links")
+    
+    # === GOOGLE FORMS LINKS ===
+    st.markdown("### 📝 Google Forms & Tabelle")
+    
+    # Links aus secrets oder hardcoded
+    form_edit_url = st.secrets.get("form_edit_url", "https://docs.google.com/forms/d/1FNv0ByOfq-q6ThDZVB1hJm2iiGcfSM_PYs4RMNTPldc/edit")
+    form_public_url = st.secrets.get("form_public_url", "https://docs.google.com/forms/d/e/1FAIpQLSdXXX/viewform")
+    sheet_url = st.secrets.get("sheet_url", "https://docs.google.com/spreadsheets/d/1FNv0ByOfq-q6ThDZVB1hJm2iiGcfSM_PYs4RMNTPldc/edit")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("**🔧 Formular bearbeiten**")
+        st.markdown(f"[Formular öffnen]({form_edit_url})")
+    
+    with col2:
+        st.markdown("**🌐 Öffentlicher Link**")
+        st.markdown(f"[Formular ansehen]({form_public_url})")
+    
+    with col3:
+        st.markdown("**📊 Google Sheet**")
+        st.markdown(f"[Tabelle öffnen]({sheet_url})")
+    
+    st.divider()
+    
+    # === EINBETTUNGSCODE ===
+    st.markdown("### 🖥️ Einbettungscode für Website")
+    st.caption("Diesen Code kann dein Webseiten-Admin verwenden:")
+    
+    embed_code = f'''<iframe 
+  src="{form_public_url}?embedded=true" 
+  width="100%" 
+  height="1200" 
+  frameborder="0" 
+  marginheight="0" 
+  marginwidth="0">
+  Wird geladen…
+</iframe>'''
+    
+    st.code(embed_code, language="html")
+    
+    st.divider()
+    
+    # === SYNC EINSTELLUNGEN ===
+    st.markdown("### 🔄 Sync-Einstellungen")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🔄 Auto-Sync zurücksetzen"):
+            st.session_state.auto_sync_done = False
+            st.success("Auto-Sync zurückgesetzt. Wird beim nächsten Laden ausgeführt.")
+            st.rerun()
+    
+    with col2:
+        if st.button("📊 Statistik aktualisieren"):
+            st.rerun()
+    
+    st.divider()
+    
+    # === ADMIN INFO ===
+    st.markdown("### 👑 Admin-Info")
+    st.info(f"""
+    **Admin-Passwort ändern:**
+    In Streamlit Cloud Secrets unter `admin_password` setzen.
+    
+    **Links anpassen:**
+    In Secrets können folgende Werte gesetzt werden:
+    - `form_edit_url` - Link zum Bearbeiten des Formulars
+    - `form_public_url` - Öffentlicher Link zum Formular  
+    - `sheet_url` - Link zur Google-Tabelle
+    """)
