@@ -360,13 +360,9 @@ def export_meinverein_csv():
                 beitrag_betrag = beitrag
                 beitrag_zeitraum = "monatlich"
             
-            # Beitragstyp für MeinVerein
-            if mitgliedsart == "juristisch":
-                beitrag_typ = "Standard juristische Person"
-            elif zahlungsweise == "jaehrlich":
-                beitrag_typ = "Standard jährlich"
-            else:
-                beitrag_typ = "Standard monatlich"
+            # Beitragstyp für MeinVerein - leer lassen, muss manuell gesetzt werden
+            # MeinVerein akzeptiert diese Werte beim Import nicht
+            beitrag_typ = ""
             
             row = {
                 "Mitgliedsnr.": "",  # Leer lassen - MeinVerein vergibt automatisch
