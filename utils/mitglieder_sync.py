@@ -271,7 +271,8 @@ def sync_to_hubspot():
                         "address": m.get("strasse", ""),
                         "zip": m.get("plz", ""),
                         "city": m.get("ort", ""),
-                        "salutation": salutation
+                        "salutation": salutation,
+                        "mitglied_im_verein_fur_unternehmer": "true"  # Vereinsmitglied markieren
                     }
                 }
                 
