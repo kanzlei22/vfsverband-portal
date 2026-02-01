@@ -19,14 +19,24 @@ from utils.mitglieder_sync import (
 st.set_page_config(page_title="Admin - Mitgliederverwaltung", page_icon="👑", layout="wide")
 
 # === ADMIN CHECK via Google E-Mail ===
-# Admin-Emails aus Secrets holen (kann Liste oder String sein)
-admin_emails_raw = st.secrets.get("admin_emails", [])
+# Admin-Emails aus Secrets holen - verschiedene Formate unterstützen
+admin_emails = []
 
-# Falls es ein String ist, in Liste umwandeln
-if isinstance(admin_emails_raw, str):
-    admin_emails = [admin_emails_raw.lower().strip()]
-else:
-    admin_emails = [e.lower().strip() for e in admin_emails_raw]
+# Variante 1: [admin] emails = [...]
+if "admin" in st.secrets and "emails" in st.secrets["admin"]:
+    admin_emails_raw = st.secrets["admin"]["emails"]
+    if isinstance(admin_emails_raw, str):
+        admin_emails = [admin_emails_raw.lower().strip()]
+    else:
+        admin_emails = [e.lower().strip() for e in admin_emails_raw]
+
+# Variante 2: admin_emails = [...]
+elif "admin_emails" in st.secrets:
+    admin_emails_raw = st.secrets["admin_emails"]
+    if isinstance(admin_emails_raw, str):
+        admin_emails = [admin_emails_raw.lower().strip()]
+    else:
+        admin_emails = [e.lower().strip() for e in admin_emails_raw]
 
 # User E-Mail holen
 user_email = ""

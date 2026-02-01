@@ -128,7 +128,22 @@ def render_sidebar():
         st.caption(f"© 2026 {COMPANY_NAME}")
         
         # === ADMIN-BEREICH (nur für Admin-E-Mails sichtbar) ===
-        admin_emails = [e.lower() for e in st.secrets.get("admin_emails", [])]
+        # Admin-Emails aus Secrets holen - verschiedene Formate unterstützen
+        admin_emails = []
+        
+        if "admin" in st.secrets and "emails" in st.secrets["admin"]:
+            admin_emails_raw = st.secrets["admin"]["emails"]
+            if isinstance(admin_emails_raw, str):
+                admin_emails = [admin_emails_raw.lower().strip()]
+            else:
+                admin_emails = [e.lower().strip() for e in admin_emails_raw]
+        elif "admin_emails" in st.secrets:
+            admin_emails_raw = st.secrets["admin_emails"]
+            if isinstance(admin_emails_raw, str):
+                admin_emails = [admin_emails_raw.lower().strip()]
+            else:
+                admin_emails = [e.lower().strip() for e in admin_emails_raw]
+        
         user_email = st.session_state.user.get("email", "").lower() if st.session_state.user else ""
         
         if user_email in admin_emails:
