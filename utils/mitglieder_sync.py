@@ -1,8 +1,13 @@
 """
-Mitglieder Synchronisation
+Mitglieder Synchronisation V2
 - Google Sheets → Supabase
 - Supabase → HubSpot
-- Supabase → MeinVerein CSV Export
+- Supabase → MeinVerein XLSX Export
+
+Änderungen V2:
+- Instagramname Feld
+- Zahlungsart: lastschrift / rechnung
+- MeinVerein Export mit individuellen Feldern
 """
 
 import streamlit as st
@@ -59,25 +64,24 @@ def sync_from_google_sheet():
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
         
-        # Credentials aus Secrets
-        if "google_oauth_token" not in st.secrets:
+        # Token aus Secrets holen
+        token_data = st.secrets.get("google_oauth_token", {})
+        if not token_data:
             return {"success": False, "imported": 0, "error": "Google OAuth Token nicht konfiguriert."}
         
-        token_info = dict(st.secrets["google_oauth_token"])
         creds = Credentials(
-            token=token_info.get("token"),
-            refresh_token=token_info.get("refresh_token"),
-            token_uri=token_info.get("token_uri"),
-            client_id=token_info.get("client_id"),
-            client_secret=token_info.get("client_secret")
+            token=token_data.get("token"),
+            refresh_token=token_data.get("refresh_token"),
+            token_uri=token_data.get("token_uri"),
+            client_id=token_data.get("client_id"),
+            client_secret=token_data.get("client_secret")
         )
         
-        service = build('sheets', 'v4', credentials=creds)
-        
-        # Daten aus Sheet laden
-        result = service.spreadsheets().values().get(
+        # Sheet-Daten lesen
+        sheets_service = build('sheets', 'v4', credentials=creds)
+        result = sheets_service.spreadsheets().values().get(
             spreadsheetId=sheet_id,
-            range='A:Z'  # Alle Spalten
+            range="A:Z"
         ).execute()
         
         rows = result.get('values', [])
@@ -88,20 +92,22 @@ def sync_from_google_sheet():
         # Header-Zeile
         headers = rows[0]
         
-        # Mapping der Spalten (anpassen je nach Google Form)
+        # Mapping der Spalten (anpassen je nach Google Form V2)
         column_map = {
             "Anrede": "anrede",
             "Vorname": "vorname",
             "Nachname": "nachname",
-            "E-Mail-Adresse": "email",
-            "Telefon / Mobil": "telefon",
-            "Straße und Hausnummer": "strasse",
+            "E-Mail": "email",
+            "Telefon": "telefon",
+            "Instagram": "instagramname",
+            "Straße": "strasse",
             "Postleitzahl": "plz",
             "Ort": "ort",
             "IBAN": "iban",
             "Kontoinhaber": "kontoinhaber",
-            "Ich beantrage die Mitgliedschaft als": "mitgliedsart_raw",
+            "Mitgliedschaft als": "mitgliedsart_raw",
             "Zahlungsweise": "zahlungsweise_raw",
+            "Zahlungsart": "zahlungsart_raw",
             "Firmenname": "firmenname",
             "Zeitstempel": "timestamp"
         }
@@ -150,10 +156,18 @@ def sync_from_google_sheet():
                 zahlungsweise_raw = get_val("zahlungsweise_raw", "")
                 zahlungsweise = "jaehrlich" if "jährlich" in zahlungsweise_raw.lower() or "jahr" in zahlungsweise_raw.lower() else "monatlich"
                 
+                # Zahlungsart parsen (Lastschrift oder Rechnung)
+                zahlungsart_raw = get_val("zahlungsart_raw", "")
+                zahlungsart = "rechnung" if "rechnung" in zahlungsart_raw.lower() else "lastschrift"
+                
                 # Beitrag berechnen
                 beitrag = 25.00
                 if mitgliedsart == "juristisch":
                     zahlungsweise = "jaehrlich"  # Juristische Personen nur jährlich
+                
+                # IBAN und Kontoinhaber nur wenn Lastschrift
+                iban_val = get_val("iban").replace(" ", "").upper() if zahlungsart == "lastschrift" else ""
+                kontoinhaber_val = get_val("kontoinhaber") if zahlungsart == "lastschrift" else ""
                 
                 # Neues Mitglied anlegen
                 neues_mitglied = {
@@ -162,13 +176,16 @@ def sync_from_google_sheet():
                     "nachname": get_val("nachname"),
                     "email": email,
                     "telefon": get_val("telefon"),
+                    "instagramname": get_val("instagramname"),
+                    "firmenname": get_val("firmenname"),
                     "strasse": get_val("strasse"),
                     "plz": get_val("plz"),
                     "ort": get_val("ort"),
-                    "iban": get_val("iban").replace(" ", "").upper(),
-                    "kontoinhaber": get_val("kontoinhaber"),
+                    "iban": iban_val,
+                    "kontoinhaber": kontoinhaber_val,
                     "mitgliedsart": mitgliedsart,
                     "zahlungsweise": zahlungsweise,
+                    "zahlungsart": zahlungsart,
                     "beitrag_monatlich": beitrag,
                     "status": "neu",
                     "quelle": "google_forms"
@@ -207,42 +224,46 @@ def sync_to_hubspot():
         if not mitglieder:
             return {"success": True, "synced": 0, "error": None}
         
-        synced = 0
         headers = {
             "Authorization": f"Bearer {api_token}",
             "Content-Type": "application/json"
         }
         
+        synced = 0
+        
         for m in mitglieder:
             try:
-                # Anrede für HubSpot (Liebe/Lieber)
-                anrede_hs = "Lieber" if m.get("anrede") == "Herr" else "Liebe"
+                # Anrede konvertieren für HubSpot
+                anrede = m.get("anrede", "Herr")
+                if anrede == "Herr":
+                    salutation = "Lieber"
+                elif anrede == "Frau":
+                    salutation = "Liebe"
+                else:
+                    salutation = "Hallo"
                 
                 # Kontakt-Daten für HubSpot
                 contact_data = {
                     "properties": {
-                        "email": m["email"],
-                        "firstname": m["vorname"],
-                        "lastname": m["nachname"],
+                        "email": m.get("email", ""),
+                        "firstname": m.get("vorname", ""),
+                        "lastname": m.get("nachname", ""),
                         "phone": m.get("telefon", ""),
                         "address": m.get("strasse", ""),
                         "zip": m.get("plz", ""),
                         "city": m.get("ort", ""),
-                        "salutation": anrede_hs,
-                        # Custom Properties (falls vorhanden in HubSpot)
-                        # "mitgliedsnummer": m.get("mandatsreferenz", ""),
-                        # "mitglied_seit": m.get("genehmigt_am", "")[:10] if m.get("genehmigt_am") else ""
+                        "salutation": salutation
                     }
                 }
                 
-                # Prüfen ob Kontakt bereits existiert
+                # Prüfen ob Kontakt existiert
                 search_url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
                 search_body = {
                     "filterGroups": [{
                         "filters": [{
                             "propertyName": "email",
                             "operator": "EQ",
-                            "value": m["email"]
+                            "value": m.get("email", "")
                         }]
                     }]
                 }
@@ -303,7 +324,7 @@ def export_meinverein_csv():
         if not mitglieder:
             return {"success": False, "xlsx_data": None, "member_ids": [], "error": "Keine Mitglieder zum Exportieren."}
         
-        # MeinVerein Spalten (exakt wie in der Vorlage, ohne individuelle Felder)
+        # MeinVerein Spalten (mit individuellen Feldern für Zahlungsweise + Instagram)
         columns = [
             "Mitgliedsnr.", "Anrede", "Titel", "Vorname", "Nachname",
             "Telefon", "Mobil", "E-Mail", "Strasse & Hausnr.", "PLZ", "Ort", "Land",
@@ -313,7 +334,8 @@ def export_meinverein_csv():
             "Beitrag (Zeitraum)", "Beitrag (Fälligkeit)", "Notizen",
             "Geschlecht", "Familienstand", "Zahlungsart", "IBAN", "Kontoinhaber",
             "SEPA-Mandat erteilt", "Mandatsreferenz", "Art des Mandats",
-            "Art der nächsten Lastschrift", "Mandat erteilt am", "Letzte Verwendung"
+            "Art der nächsten Lastschrift", "Mandat erteilt am", "Letzte Verwendung",
+            "Individuelles Feld 1", "Individuelles Feld 2"
         ]
         
         rows = []
@@ -353,6 +375,8 @@ def export_meinverein_csv():
             beitrag = m.get("beitrag_monatlich", 25.00)
             zahlungsweise = m.get("zahlungsweise", "monatlich")
             mitgliedsart = m.get("mitgliedsart", "natuerlich")
+            zahlungsart = m.get("zahlungsart", "lastschrift")
+            
             if zahlungsweise == "jaehrlich":
                 beitrag_betrag = beitrag * 12
                 beitrag_zeitraum = "jährlich"
@@ -361,8 +385,16 @@ def export_meinverein_csv():
                 beitrag_zeitraum = "monatlich"
             
             # Beitragstyp für MeinVerein - leer lassen, muss manuell gesetzt werden
-            # MeinVerein akzeptiert diese Werte beim Import nicht
             beitrag_typ = ""
+            
+            # Zahlungsart für MeinVerein (Lastschrift oder per Rechnung)
+            zahlungsart_mv = "Lastschrift" if zahlungsart == "lastschrift" else "per Rechnung"
+            
+            # SEPA nur wenn Lastschrift und IBAN vorhanden
+            sepa_erteilt = "ja" if zahlungsart == "lastschrift" and m.get("iban") else "nein"
+            
+            # Zahlungsweise für individuelles Feld 1 (lesbarer Text)
+            zahlungsweise_text = "Monatlich" if zahlungsweise == "monatlich" else "Jährlich"
             
             row = {
                 "Mitgliedsnr.": "",  # Leer lassen - MeinVerein vergibt automatisch
@@ -386,22 +418,24 @@ def export_meinverein_csv():
                 "Status": "Aktiv",
                 "Mitglied bis": "",
                 "Beitrag (Bezeichnung)": "",
-                "Beitrag (Typ)": beitrag_typ,  # Jetzt mit korrektem MeinVerein-Wert
+                "Beitrag (Typ)": beitrag_typ,
                 "Beitrag (Betrag)": "",
                 "Beitrag (Zeitraum)": "",
                 "Beitrag (Fälligkeit)": "",
                 "Notizen": m.get("notizen", ""),
                 "Geschlecht": geschlecht,
                 "Familienstand": "",
-                "Zahlungsart": "Lastschrift",
-                "IBAN": m.get("iban", "").replace(" ", ""),
-                "Kontoinhaber": m.get("kontoinhaber", ""),
-                "SEPA-Mandat erteilt": "ja",
-                "Mandatsreferenz": m.get("mandatsreferenz", ""),
-                "Art des Mandats": "Einmalig",
-                "Art der nächsten Lastschrift": "Erste Lastschrift",
-                "Mandat erteilt am": mandatsdatum_obj,
-                "Letzte Verwendung": ""
+                "Zahlungsart": zahlungsart_mv,
+                "IBAN": m.get("iban", "").replace(" ", "") if m.get("iban") else "",
+                "Kontoinhaber": m.get("kontoinhaber", "") if m.get("kontoinhaber") else "",
+                "SEPA-Mandat erteilt": sepa_erteilt,
+                "Mandatsreferenz": m.get("mandatsreferenz", "") if sepa_erteilt == "ja" else "",
+                "Art des Mandats": "Einmalig" if sepa_erteilt == "ja" else "",
+                "Art der nächsten Lastschrift": "Erste Lastschrift" if sepa_erteilt == "ja" else "",
+                "Mandat erteilt am": mandatsdatum_obj if sepa_erteilt == "ja" else "",
+                "Letzte Verwendung": "",
+                "Individuelles Feld 1": zahlungsweise_text,
+                "Individuelles Feld 2": m.get("instagramname", "")
             }
             
             rows.append(row)
@@ -427,6 +461,23 @@ def export_meinverein_csv():
         return {"success": False, "xlsx_data": None, "member_ids": [], "error": str(e)}
 
 
+def mark_meinverein_exported(member_ids):
+    """Markiert Mitglieder als zu MeinVerein exportiert."""
+    try:
+        supabase = get_supabase()
+        
+        for member_id in member_ids:
+            supabase.table("mitglieder").update({
+                "sync_meinverein": True,
+                "sync_meinverein_datum": datetime.now().isoformat()
+            }).eq("id", member_id).execute()
+        
+        return {"success": True, "error": None}
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 def import_wiso_excel(file_data):
     """
     Importiert Bestandsmitglieder aus Wiso-Excel-Export.
@@ -436,24 +487,42 @@ def import_wiso_excel(file_data):
         import pandas as pd
         
         # Excel lesen
-        df = pd.read_excel(io.BytesIO(file_data))
+        df = pd.read_excel(file_data)
+        
+        # Spalten-Mapping (flexibel für verschiedene Spaltennamen)
+        column_variants = {
+            "email": ["E-Mail", "Email", "e-mail", "EMail", "E-Mail-Adresse", "email"],
+            "vorname": ["Vorname", "First Name", "vorname"],
+            "nachname": ["Nachname", "Name", "Last Name", "nachname"],
+            "anrede": ["Anrede", "Salutation", "anrede"],
+            "strasse": ["Straße", "Strasse", "Adresse", "Street", "strasse", "Strasse & Hausnr."],
+            "plz": ["PLZ", "Postleitzahl", "ZIP", "plz"],
+            "ort": ["Ort", "Stadt", "City", "ort"],
+            "telefon": ["Telefon", "Phone", "Mobil", "telefon"],
+            "iban": ["IBAN", "iban"],
+            "kontoinhaber": ["Kontoinhaber", "Account Holder", "kontoinhaber"],
+        }
+        
+        # Tatsächliche Spaltennamen finden
+        column_map = {}
+        for db_col, variants in column_variants.items():
+            for variant in variants:
+                if variant in df.columns:
+                    column_map[db_col] = variant
+                    break
+        
+        if "email" not in column_map:
+            return {"success": False, "imported": 0, "error": "E-Mail-Spalte nicht gefunden."}
         
         supabase = get_supabase()
         imported = 0
-        
-        # Spalten-Mapping (anpassen je nach Wiso-Export)
-        # Typische Wiso-Spalten: Anrede, Vorname, Nachname, E-Mail, Straße, PLZ, Ort, IBAN, etc.
+        import_counter = 1
         
         for _, row in df.iterrows():
             try:
-                # E-Mail extrahieren (verschiedene mögliche Spaltennamen)
-                email = None
-                for col in ["E-Mail", "Email", "e-mail", "EMail", "E-Mail-Adresse"]:
-                    if col in df.columns and pd.notna(row.get(col)):
-                        email = str(row[col]).strip().lower()
-                        break
+                email = str(row[column_map["email"]]).strip().lower()
                 
-                if not email:
+                if not email or email == "nan" or "@" not in email:
                     continue
                 
                 # Prüfen ob bereits existiert
@@ -461,38 +530,41 @@ def import_wiso_excel(file_data):
                 if existing.data:
                     continue
                 
-                # Daten extrahieren
-                def get_col(possible_names, default=""):
-                    for name in possible_names:
-                        if name in df.columns and pd.notna(row.get(name)):
-                            return str(row[name]).strip()
+                def get_val(key, default=""):
+                    if key in column_map and column_map[key] in row:
+                        val = row[column_map[key]]
+                        return str(val).strip() if pd.notna(val) else default
                     return default
                 
+                # Mandatsreferenz für Import generieren
+                mandatsreferenz = f"UV-IMPORT-{import_counter:04d}"
+                import_counter += 1
+                
                 neues_mitglied = {
-                    "anrede": get_col(["Anrede", "Titel"], "Herr"),
-                    "vorname": get_col(["Vorname", "First Name"]),
-                    "nachname": get_col(["Nachname", "Name", "Last Name"]),
+                    "anrede": get_val("anrede", "Herr"),
+                    "vorname": get_val("vorname"),
+                    "nachname": get_val("nachname"),
                     "email": email,
-                    "telefon": get_col(["Telefon", "Tel", "Phone", "Mobil"]),
-                    "strasse": get_col(["Straße", "Strasse", "Adresse", "Street"]),
-                    "plz": get_col(["PLZ", "Postleitzahl", "ZIP"]),
-                    "ort": get_col(["Ort", "Stadt", "City"]),
-                    "iban": get_col(["IBAN"]).replace(" ", "").upper(),
-                    "kontoinhaber": get_col(["Kontoinhaber", "Kontoinh."], ""),
+                    "telefon": get_val("telefon"),
+                    "strasse": get_val("strasse"),
+                    "plz": get_val("plz"),
+                    "ort": get_val("ort"),
+                    "iban": get_val("iban").replace(" ", "").upper(),
+                    "kontoinhaber": get_val("kontoinhaber"),
                     "mitgliedsart": "natuerlich",
                     "zahlungsweise": "monatlich",
+                    "zahlungsart": "lastschrift",
                     "beitrag_monatlich": 25.00,
-                    "status": "genehmigt",  # Bestandsmitglieder sind bereits genehmigt
+                    "status": "genehmigt",  # Bestandsmitglieder sind bereits aktiv
                     "quelle": "wiso_import",
-                    "genehmigt_am": datetime.now().isoformat(),
-                    "mandatsreferenz": f"UV-IMPORT-{imported+1:04d}"
+                    "mandatsreferenz": mandatsreferenz,
+                    "mandatsdatum": datetime.now().strftime("%Y-%m-%d"),
+                    "genehmigt_am": datetime.now().isoformat()
                 }
                 
-                # Nur anlegen wenn Mindestdaten vorhanden
-                if neues_mitglied["vorname"] and neues_mitglied["nachname"]:
-                    supabase.table("mitglieder").insert(neues_mitglied).execute()
-                    imported += 1
-                    
+                supabase.table("mitglieder").insert(neues_mitglied).execute()
+                imported += 1
+                
             except Exception as e:
                 continue
         
@@ -500,3 +572,194 @@ def import_wiso_excel(file_data):
         
     except Exception as e:
         return {"success": False, "imported": 0, "error": str(e)}
+
+
+def generate_mandatsreferenz():
+    """Generiert eine eindeutige Mandatsreferenz."""
+    import secrets
+    year = datetime.now().year
+    random_part = secrets.token_hex(4).upper()
+    return f"UV-{year}-{random_part}"
+
+
+def approve_mitglied(mitglied_id):
+    """
+    Genehmigt ein Mitglied und generiert Mandatsreferenz.
+    Returns: {"success": bool, "error": str}
+    """
+    try:
+        supabase = get_supabase()
+        
+        # Mitglied laden
+        response = supabase.table("mitglieder").select("*").eq("id", mitglied_id).execute()
+        
+        if not response.data:
+            return {"success": False, "error": "Mitglied nicht gefunden."}
+        
+        mitglied = response.data[0]
+        
+        # Mandatsreferenz generieren (nur wenn Lastschrift und noch keine vorhanden)
+        mandatsreferenz = mitglied.get("mandatsreferenz")
+        mandatsdatum = mitglied.get("mandatsdatum")
+        
+        if mitglied.get("zahlungsart", "lastschrift") == "lastschrift" and not mandatsreferenz:
+            mandatsreferenz = generate_mandatsreferenz()
+            mandatsdatum = datetime.now().strftime("%Y-%m-%d")
+        
+        # Update
+        update_data = {
+            "status": "genehmigt",
+            "genehmigt_am": datetime.now().isoformat()
+        }
+        
+        if mandatsreferenz:
+            update_data["mandatsreferenz"] = mandatsreferenz
+        if mandatsdatum:
+            update_data["mandatsdatum"] = mandatsdatum
+        
+        supabase.table("mitglieder").update(update_data).eq("id", mitglied_id).execute()
+        
+        return {"success": True, "error": None}
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def reject_mitglied(mitglied_id, grund=""):
+    """
+    Lehnt ein Mitglied ab.
+    Returns: {"success": bool, "error": str}
+    """
+    try:
+        supabase = get_supabase()
+        
+        supabase.table("mitglieder").update({
+            "status": "abgelehnt",
+            "notizen": grund
+        }).eq("id", mitglied_id).execute()
+        
+        return {"success": True, "error": None}
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def set_pending(mitglied_id):
+    """Setzt Mitglied auf 'in Prüfung'."""
+    try:
+        supabase = get_supabase()
+        
+        supabase.table("mitglieder").update({
+            "status": "pending"
+        }).eq("id", mitglied_id).execute()
+        
+        return {"success": True, "error": None}
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def get_mitglieder_by_status(status):
+    """Lädt Mitglieder nach Status."""
+    try:
+        supabase = get_supabase()
+        
+        response = supabase.table("mitglieder").select("*").eq("status", status).order("created_at", desc=True).execute()
+        
+        return response.data if response.data else []
+        
+    except Exception as e:
+        st.error(f"Fehler beim Laden: {e}")
+        return []
+
+
+def get_all_mitglieder():
+    """Lädt alle Mitglieder."""
+    try:
+        supabase = get_supabase()
+        
+        response = supabase.table("mitglieder").select("*").order("created_at", desc=True).execute()
+        
+        return response.data if response.data else []
+        
+    except Exception as e:
+        st.error(f"Fehler beim Laden: {e}")
+        return []
+
+
+def create_mitglied_manual(data):
+    """
+    Legt ein Mitglied manuell an.
+    Returns: {"success": bool, "error": str}
+    """
+    try:
+        supabase = get_supabase()
+        
+        # Pflichtfelder prüfen
+        if not data.get("email"):
+            return {"success": False, "error": "E-Mail ist erforderlich."}
+        
+        # Prüfen ob bereits existiert
+        existing = supabase.table("mitglieder").select("id").eq("email", data["email"].lower()).execute()
+        if existing.data:
+            return {"success": False, "error": "Diese E-Mail-Adresse existiert bereits."}
+        
+        # Mandatsreferenz generieren falls genehmigt und Lastschrift
+        if data.get("status") == "genehmigt" and data.get("zahlungsart", "lastschrift") == "lastschrift":
+            data["mandatsreferenz"] = generate_mandatsreferenz()
+            data["mandatsdatum"] = datetime.now().strftime("%Y-%m-%d")
+            data["genehmigt_am"] = datetime.now().isoformat()
+        
+        # E-Mail normalisieren
+        data["email"] = data["email"].lower().strip()
+        
+        supabase.table("mitglieder").insert(data).execute()
+        
+        return {"success": True, "error": None}
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def get_sync_history():
+    """Gibt die letzten Sync-Ereignisse zurück."""
+    try:
+        supabase = get_supabase()
+        
+        # Letzte HubSpot-Syncs
+        hubspot_syncs = supabase.table("mitglieder").select(
+            "vorname", "nachname", "sync_hubspot_datum"
+        ).eq("sync_hubspot", True).order("sync_hubspot_datum", desc=True).limit(5).execute()
+        
+        # Letzte MeinVerein-Exports
+        meinverein_exports = supabase.table("mitglieder").select(
+            "vorname", "nachname", "sync_meinverein_datum"
+        ).eq("sync_meinverein", True).order("sync_meinverein_datum", desc=True).limit(5).execute()
+        
+        return {
+            "hubspot": hubspot_syncs.data if hubspot_syncs.data else [],
+            "meinverein": meinverein_exports.data if meinverein_exports.data else []
+        }
+        
+    except Exception as e:
+        return {"hubspot": [], "meinverein": []}
+
+
+def get_pending_sync_counts():
+    """Gibt die Anzahl ausstehender Syncs zurück."""
+    try:
+        supabase = get_supabase()
+        
+        # HubSpot ausstehend
+        hubspot = supabase.table("mitglieder").select("id", count="exact").eq("status", "genehmigt").eq("sync_hubspot", False).execute()
+        
+        # MeinVerein ausstehend
+        meinverein = supabase.table("mitglieder").select("id", count="exact").eq("status", "genehmigt").eq("sync_meinverein", False).execute()
+        
+        return {
+            "hubspot": hubspot.count if hubspot.count else 0,
+            "meinverein": meinverein.count if meinverein.count else 0
+        }
+        
+    except Exception as e:
+        return {"hubspot": 0, "meinverein": 0}
