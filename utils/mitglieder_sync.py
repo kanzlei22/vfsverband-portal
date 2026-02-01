@@ -352,12 +352,21 @@ def export_meinverein_csv():
             # Beitrag
             beitrag = m.get("beitrag_monatlich", 25.00)
             zahlungsweise = m.get("zahlungsweise", "monatlich")
+            mitgliedsart = m.get("mitgliedsart", "natuerlich")
             if zahlungsweise == "jaehrlich":
                 beitrag_betrag = beitrag * 12
                 beitrag_zeitraum = "jährlich"
             else:
                 beitrag_betrag = beitrag
                 beitrag_zeitraum = "monatlich"
+            
+            # Beitragstyp für MeinVerein
+            if mitgliedsart == "juristisch":
+                beitrag_typ = "Standard juristische Person"
+            elif zahlungsweise == "jaehrlich":
+                beitrag_typ = "Standard jährlich"
+            else:
+                beitrag_typ = "Standard monatlich"
             
             row = {
                 "Mitgliedsnr.": "",  # Leer lassen - MeinVerein vergibt automatisch
@@ -380,18 +389,18 @@ def export_meinverein_csv():
                 "Ehrenmitglied": "Nein",
                 "Status": "Aktiv",
                 "Mitglied bis": "",
-                "Beitrag (Bezeichnung)": "",  # Leer - wird in MeinVerein konfiguriert
-                "Beitrag (Typ)": "",  # Leer - wird in MeinVerein konfiguriert
-                "Beitrag (Betrag)": "",  # Leer
-                "Beitrag (Zeitraum)": "",  # Leer
-                "Beitrag (Fälligkeit)": "",  # Leer
+                "Beitrag (Bezeichnung)": "",
+                "Beitrag (Typ)": beitrag_typ,  # Jetzt mit korrektem MeinVerein-Wert
+                "Beitrag (Betrag)": "",
+                "Beitrag (Zeitraum)": "",
+                "Beitrag (Fälligkeit)": "",
                 "Notizen": m.get("notizen", ""),
                 "Geschlecht": geschlecht,
                 "Familienstand": "",
                 "Zahlungsart": "Lastschrift",
                 "IBAN": m.get("iban", "").replace(" ", ""),
                 "Kontoinhaber": m.get("kontoinhaber", ""),
-                "SEPA-Mandat erteilt": "ja",  # klein geschrieben!
+                "SEPA-Mandat erteilt": "ja",
                 "Mandatsreferenz": m.get("mandatsreferenz", ""),
                 "Art des Mandats": "Einmalig",
                 "Art der nächsten Lastschrift": "Erste Lastschrift",
