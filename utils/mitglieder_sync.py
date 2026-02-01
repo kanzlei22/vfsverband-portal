@@ -77,11 +77,30 @@ def sync_from_google_sheet():
             client_secret=token_data.get("client_secret")
         )
         
-        # Sheet-Daten lesen
+        # Sheet-Daten lesen (Formularantworten Tab)
         sheets_service = build('sheets', 'v4', credentials=creds)
+        
+        # Erst alle Tabs holen um den richtigen zu finden
+        sheet_meta = sheets_service.spreadsheets().get(spreadsheetId=sheet_id).execute()
+        sheets = sheet_meta.get('sheets', [])
+        
+        # Tab mit "Formular" oder "Form" im Namen finden, sonst ersten Tab
+        tab_name = None
+        for s in sheets:
+            title = s['properties']['title']
+            if 'formular' in title.lower() or 'form' in title.lower() or 'antwort' in title.lower():
+                tab_name = title
+                break
+        
+        if not tab_name and sheets:
+            tab_name = sheets[0]['properties']['title']
+        
+        # Range mit Tab-Name
+        range_str = f"'{tab_name}'!A:Z" if tab_name else "A:Z"
+        
         result = sheets_service.spreadsheets().values().get(
             spreadsheetId=sheet_id,
-            range="A:Z"
+            range=range_str
         ).execute()
         
         rows = result.get('values', [])
@@ -324,7 +343,7 @@ def export_meinverein_csv():
         if not mitglieder:
             return {"success": False, "xlsx_data": None, "member_ids": [], "error": "Keine Mitglieder zum Exportieren."}
         
-        # MeinVerein Spalten (mit individuellen Feldern für Zahlungsweise + Instagram)
+        # MeinVerein Spalten (OHNE individuelle Felder - MeinVerein akzeptiert sie nicht beim Import)
         columns = [
             "Mitgliedsnr.", "Anrede", "Titel", "Vorname", "Nachname",
             "Telefon", "Mobil", "E-Mail", "Strasse & Hausnr.", "PLZ", "Ort", "Land",
@@ -334,8 +353,7 @@ def export_meinverein_csv():
             "Beitrag (Zeitraum)", "Beitrag (Fälligkeit)", "Notizen",
             "Geschlecht", "Familienstand", "Zahlungsart", "IBAN", "Kontoinhaber",
             "SEPA-Mandat erteilt", "Mandatsreferenz", "Art des Mandats",
-            "Art der nächsten Lastschrift", "Mandat erteilt am", "Letzte Verwendung",
-            "Individuelles Feld 1", "Individuelles Feld 2"
+            "Art der nächsten Lastschrift", "Mandat erteilt am", "Letzte Verwendung"
         ]
         
         rows = []
@@ -393,9 +411,6 @@ def export_meinverein_csv():
             # SEPA nur wenn Lastschrift und IBAN vorhanden
             sepa_erteilt = "ja" if zahlungsart == "lastschrift" and m.get("iban") else "nein"
             
-            # Zahlungsweise für individuelles Feld 1 (lesbarer Text)
-            zahlungsweise_text = "Monatlich" if zahlungsweise == "monatlich" else "Jährlich"
-            
             row = {
                 "Mitgliedsnr.": "",  # Leer lassen - MeinVerein vergibt automatisch
                 "Anrede": anrede,
@@ -433,9 +448,7 @@ def export_meinverein_csv():
                 "Art des Mandats": "Einmalig" if sepa_erteilt == "ja" else "",
                 "Art der nächsten Lastschrift": "Erste Lastschrift" if sepa_erteilt == "ja" else "",
                 "Mandat erteilt am": mandatsdatum_obj if sepa_erteilt == "ja" else "",
-                "Letzte Verwendung": "",
-                "Individuelles Feld 1": zahlungsweise_text,
-                "Individuelles Feld 2": m.get("instagramname", "")
+                "Letzte Verwendung": ""
             }
             
             rows.append(row)
