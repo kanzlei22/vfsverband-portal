@@ -1,7 +1,6 @@
 """
 👥 Mitgliederverwaltung (Admin-Bereich)
 UnternehmerVernetzt Deutschland e.V.
-VERSTECKTE SEITE - nur für Admin-E-Mails erreichbar
 """
 
 import streamlit as st
@@ -16,23 +15,39 @@ from utils.mitglieder_sync import (
     mark_meinverein_exported
 )
 
+# === PAGE CONFIG muss ZUERST kommen ===
+st.set_page_config(page_title="Admin - Mitgliederverwaltung", page_icon="👑", layout="wide")
+
 # === ADMIN CHECK via Google E-Mail ===
-admin_emails = [e.lower() for e in st.secrets.get("admin_emails", [])]
+# Admin-Emails aus Secrets holen (kann Liste oder String sein)
+admin_emails_raw = st.secrets.get("admin_emails", [])
+
+# Falls es ein String ist, in Liste umwandeln
+if isinstance(admin_emails_raw, str):
+    admin_emails = [admin_emails_raw.lower().strip()]
+else:
+    admin_emails = [e.lower().strip() for e in admin_emails_raw]
+
+# User E-Mail holen
 user_email = ""
-
 if st.session_state.get("user"):
-    user_email = st.session_state.user.get("email", "").lower()
+    user_email = st.session_state.user.get("email", "").lower().strip()
 
-if user_email not in admin_emails:
+# Check
+is_admin = user_email in admin_emails and user_email != ""
+
+if not is_admin:
     st.error("⛔ Zugriff verweigert")
     st.warning("Diese Seite ist nur für Administratoren zugänglich.")
     st.info(f"Eingeloggt als: {user_email or 'Nicht eingeloggt'}")
+    # Debug-Info (kann später entfernt werden)
+    with st.expander("Debug-Info"):
+        st.write(f"User E-Mail: '{user_email}'")
+        st.write(f"Admin E-Mails: {admin_emails}")
+        st.write(f"In Liste: {user_email in admin_emails}")
     if st.button("← Zur Startseite"):
         st.switch_page("app.py")
     st.stop()
-
-# === PAGE CONFIG ===
-st.set_page_config(page_title="Admin - Mitgliederverwaltung", page_icon="👑", layout="wide")
 
 st.title("👥 Mitgliederverwaltung")
 st.caption("UnternehmerVernetzt Deutschland e.V. | 👑 Admin-Bereich")
