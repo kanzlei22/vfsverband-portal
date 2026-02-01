@@ -12,7 +12,8 @@ from utils.mitglieder_sync import (
     sync_to_hubspot,
     export_meinverein_csv,
     get_mitglieder_stats,
-    mark_meinverein_exported
+    mark_meinverein_exported,
+    import_wiso_to_hubspot
 )
 
 # === PAGE CONFIG muss ZUERST kommen ===
@@ -117,11 +118,12 @@ with col4:
 st.divider()
 
 # === TABS ===
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📥 Neue Anträge", 
     "📋 Alle Mitglieder", 
     "🔄 Synchronisation",
     "➕ Manuell anlegen",
+    "📤 Wiso → HubSpot",
     "⚙️ Einstellungen"
 ])
 
@@ -476,8 +478,106 @@ with tab4:
                         st.error("❌ Fehler beim Anlegen.")
 
 
-# --- TAB 5: EINSTELLUNGEN ---
+# --- TAB 5: WISO → HUBSPOT IMPORT ---
 with tab5:
+    st.subheader("📤 Einmaliger Wiso-Import → HubSpot")
+    
+    st.warning("""
+    ⚠️ **Einmalige Import-Funktion**
+    
+    Diese Funktion importiert alle Kontakte aus einer Wiso-Excel-Datei **direkt zu HubSpot**.
+    Bei allen Kontakten wird automatisch **"Mitglied im Verein für Unternehmer" = Ja** gesetzt.
+    
+    - Bereits existierende Kontakte werden aktualisiert (kein Duplikat)
+    - Neue Kontakte werden angelegt
+    """)
+    
+    st.divider()
+    
+    # File Upload
+    uploaded_file = st.file_uploader(
+        "📁 Wiso-Export Excel hochladen",
+        type=["xlsx", "xls"],
+        help="Exportiere deine Mitglieder aus Wiso als Excel-Datei"
+    )
+    
+    if uploaded_file:
+        st.success(f"✅ Datei geladen: {uploaded_file.name}")
+        
+        # Vorschau
+        try:
+            import pandas as pd
+            df_preview = pd.read_excel(uploaded_file)
+            
+            st.markdown("**📋 Vorschau (erste 5 Zeilen):**")
+            st.dataframe(df_preview.head(), use_container_width=True)
+            st.caption(f"Gesamt: {len(df_preview)} Zeilen | Spalten: {', '.join(df_preview.columns[:8])}...")
+            
+            # File-Pointer zurücksetzen für Import
+            uploaded_file.seek(0)
+            
+            st.divider()
+            
+            col1, col2 = st.columns([1, 2])
+            
+            with col1:
+                if st.button("🚀 Import starten", type="primary", use_container_width=True):
+                    st.session_state["start_wiso_import"] = True
+            
+            with col2:
+                st.caption("Der Import kann je nach Anzahl der Kontakte einige Minuten dauern.")
+            
+            # Import durchführen
+            if st.session_state.get("start_wiso_import", False):
+                st.session_state["start_wiso_import"] = False
+                
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                def update_progress(current, total, name):
+                    progress_bar.progress(current / total)
+                    status_text.text(f"Verarbeite {current}/{total}: {name}")
+                
+                with st.spinner("Importiere zu HubSpot..."):
+                    result = import_wiso_to_hubspot(uploaded_file, progress_callback=update_progress)
+                
+                progress_bar.empty()
+                status_text.empty()
+                
+                if result["success"]:
+                    st.balloons()
+                    st.success(f"""
+                    ✅ **Import abgeschlossen!**
+                    
+                    - Gesamt: **{result['total']}** Kontakte
+                    - Neu erstellt: **{result['created']}**
+                    - Aktualisiert: **{result['updated']}**
+                    - Übersprungen: **{result['skipped']}** (keine E-Mail)
+                    """)
+                    
+                    if result["errors"]:
+                        with st.expander(f"⚠️ {len(result['errors'])} Fehler (Details)"):
+                            for err in result["errors"]:
+                                st.write(f"- {err}")
+                else:
+                    st.error(f"❌ Import fehlgeschlagen: {result['error']}")
+        
+        except Exception as e:
+            st.error(f"❌ Fehler beim Lesen der Datei: {e}")
+    
+    else:
+        st.info("👆 Bitte lade eine Wiso-Export Excel-Datei hoch.")
+        
+        st.markdown("""
+        **So exportierst du aus Wiso:**
+        1. Wiso → Mitglieder → Alle auswählen
+        2. Export → Excel
+        3. Hier hochladen
+        """)
+
+
+# --- TAB 6: EINSTELLUNGEN ---
+with tab6:
     st.subheader("⚙️ Einstellungen & Links")
     
     # === GOOGLE FORMS LINKS ===

@@ -777,3 +777,169 @@ def get_pending_sync_counts():
         
     except Exception as e:
         return {"hubspot": 0, "meinverein": 0}
+
+
+def import_wiso_to_hubspot(file_data, progress_callback=None):
+    """
+    EINMALIGER IMPORT: Wiso-Excel direkt zu HubSpot.
+    Setzt bei allen Kontakten "Mitglied im Verein für Unternehmer" = Ja.
+    
+    Args:
+        file_data: Excel-Datei (BytesIO oder UploadedFile)
+        progress_callback: Optional callback(current, total, name) für Progress-Updates
+    
+    Returns: {
+        "success": bool,
+        "total": int,
+        "created": int,
+        "updated": int,
+        "skipped": int,
+        "errors": list,
+        "error": str
+    }
+    """
+    try:
+        import pandas as pd
+        
+        api_token = st.secrets.get("hubspot", {}).get("api_token")
+        
+        if not api_token:
+            return {"success": False, "total": 0, "created": 0, "updated": 0, "skipped": 0, "errors": [], "error": "HubSpot API Token nicht konfiguriert."}
+        
+        # Excel lesen
+        df = pd.read_excel(file_data)
+        
+        # Spalten-Mapping (flexibel für verschiedene Spaltennamen)
+        column_variants = {
+            "email": ["E-Mail", "Email", "e-mail", "EMail", "E-Mail-Adresse", "email", "Mail"],
+            "vorname": ["Vorname", "First Name", "vorname", "FirstName"],
+            "nachname": ["Nachname", "Name", "Last Name", "nachname", "LastName", "Familienname"],
+            "anrede": ["Anrede", "Salutation", "anrede", "Title"],
+            "strasse": ["Straße", "Strasse", "Adresse", "Street", "strasse", "Strasse & Hausnr.", "Straße und Hausnummer"],
+            "plz": ["PLZ", "Postleitzahl", "ZIP", "plz"],
+            "ort": ["Ort", "Stadt", "City", "ort", "Wohnort"],
+            "telefon": ["Telefon", "Phone", "Mobil", "telefon", "Tel", "Handy"],
+        }
+        
+        # Tatsächliche Spaltennamen finden
+        column_map = {}
+        for db_col, variants in column_variants.items():
+            for variant in variants:
+                if variant in df.columns:
+                    column_map[db_col] = variant
+                    break
+        
+        if "email" not in column_map:
+            return {"success": False, "total": 0, "created": 0, "updated": 0, "skipped": 0, "errors": [], "error": f"E-Mail-Spalte nicht gefunden. Verfügbare Spalten: {list(df.columns)}"}
+        
+        headers = {
+            "Authorization": f"Bearer {api_token}",
+            "Content-Type": "application/json"
+        }
+        
+        total = len(df)
+        created = 0
+        updated = 0
+        skipped = 0
+        errors = []
+        
+        for idx, row in df.iterrows():
+            try:
+                email = str(row[column_map["email"]]).strip().lower()
+                
+                if not email or email == "nan" or "@" not in email:
+                    skipped += 1
+                    continue
+                
+                def get_val(key, default=""):
+                    if key in column_map and column_map[key] in row.index:
+                        val = row[column_map[key]]
+                        return str(val).strip() if pd.notna(val) and str(val).strip() != "nan" else default
+                    return default
+                
+                vorname = get_val("vorname")
+                nachname = get_val("nachname")
+                
+                # Progress Callback
+                if progress_callback:
+                    progress_callback(idx + 1, total, f"{vorname} {nachname}")
+                
+                # Anrede für HubSpot
+                anrede = get_val("anrede", "Herr")
+                if anrede == "Herr":
+                    salutation = "Lieber"
+                elif anrede == "Frau":
+                    salutation = "Liebe"
+                else:
+                    salutation = "Hallo"
+                
+                # Kontakt-Daten für HubSpot
+                contact_data = {
+                    "properties": {
+                        "email": email,
+                        "firstname": vorname,
+                        "lastname": nachname,
+                        "phone": get_val("telefon"),
+                        "address": get_val("strasse"),
+                        "zip": get_val("plz"),
+                        "city": get_val("ort"),
+                        "salutation": salutation,
+                        "mitglied_im_verein_fur_unternehmer": "true"  # Vereinsmitglied markieren
+                    }
+                }
+                
+                # Leere Werte entfernen
+                contact_data["properties"] = {k: v for k, v in contact_data["properties"].items() if v}
+                contact_data["properties"]["mitglied_im_verein_fur_unternehmer"] = "true"  # Immer setzen
+                
+                # Prüfen ob Kontakt existiert
+                search_url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
+                search_body = {
+                    "filterGroups": [{
+                        "filters": [{
+                            "propertyName": "email",
+                            "operator": "EQ",
+                            "value": email
+                        }]
+                    }]
+                }
+                
+                search_response = requests.post(search_url, headers=headers, json=search_body)
+                search_result = search_response.json()
+                
+                if search_result.get("total", 0) > 0:
+                    # Kontakt existiert - Update
+                    contact_id = search_result["results"][0]["id"]
+                    update_url = f"https://api.hubapi.com/crm/v3/objects/contacts/{contact_id}"
+                    update_response = requests.patch(update_url, headers=headers, json=contact_data)
+                    
+                    if update_response.status_code in [200, 201]:
+                        updated += 1
+                    else:
+                        errors.append(f"{email}: Update fehlgeschlagen - {update_response.text[:100]}")
+                else:
+                    # Neuen Kontakt erstellen
+                    create_url = "https://api.hubapi.com/crm/v3/objects/contacts"
+                    create_response = requests.post(create_url, headers=headers, json=contact_data)
+                    
+                    if create_response.status_code in [200, 201]:
+                        created += 1
+                    else:
+                        errors.append(f"{email}: Erstellen fehlgeschlagen - {create_response.text[:100]}")
+                
+            except Exception as e:
+                errors.append(f"Zeile {idx + 1}: {str(e)[:50]}")
+                continue
+        
+        return {
+            "success": True,
+            "total": total,
+            "created": created,
+            "updated": updated,
+            "skipped": skipped,
+            "errors": errors[:20],  # Maximal 20 Fehler zurückgeben
+            "error": None
+        }
+        
+    except Exception as e:
+        return {"success": False, "total": 0, "created": 0, "updated": 0, "skipped": 0, "errors": [], "error": str(e)}
