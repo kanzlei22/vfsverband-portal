@@ -1,7 +1,7 @@
 """
 👥 Mitgliederverwaltung (Admin-Bereich)
 UnternehmerVernetzt Deutschland e.V.
-VERSTECKTE SEITE - nur über Admin-Login erreichbar
+VERSTECKTE SEITE - nur für Admin-E-Mails erreichbar
 """
 
 import streamlit as st
@@ -16,11 +16,17 @@ from utils.mitglieder_sync import (
     mark_meinverein_exported
 )
 
-# === ADMIN CHECK - Bei fehlendem Login zurück zur Startseite ===
-if not st.session_state.get("is_admin", False):
+# === ADMIN CHECK via Google E-Mail ===
+admin_emails = [e.lower() for e in st.secrets.get("admin_emails", [])]
+user_email = ""
+
+if st.session_state.get("user"):
+    user_email = st.session_state.user.get("email", "").lower()
+
+if user_email not in admin_emails:
     st.error("⛔ Zugriff verweigert")
     st.warning("Diese Seite ist nur für Administratoren zugänglich.")
-    st.info("Bitte melde dich über den Admin-Bereich in der Sidebar an.")
+    st.info(f"Eingeloggt als: {user_email or 'Nicht eingeloggt'}")
     if st.button("← Zur Startseite"):
         st.switch_page("app.py")
     st.stop()
@@ -32,13 +38,7 @@ st.title("👥 Mitgliederverwaltung")
 st.caption("UnternehmerVernetzt Deutschland e.V. | 👑 Admin-Bereich")
 
 # Admin-Header
-col1, col2 = st.columns([4, 1])
-with col1:
-    st.success("👑 Admin-Modus aktiv")
-with col2:
-    if st.button("🚪 Admin abmelden"):
-        st.session_state["is_admin"] = False
-        st.switch_page("app.py")
+st.success(f"👑 Admin: {user_email}")
 
 # === AUTO-SYNC beim ersten Seitenaufruf ===
 if "auto_sync_done" not in st.session_state:
